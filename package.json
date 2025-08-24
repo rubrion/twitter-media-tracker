@@ -1,0 +1,24 @@
+{
+  "name": "social-media-tracker",
+  "version": "1.0.0",
+  "description": "Simple POC middleware for tracking Twitter metrics using Apify",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "apify-client": "^2.7.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "@types/node": "^20.5.0",
+    "tsx": "^3.12.7",
+    "typescript": "^5.1.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
