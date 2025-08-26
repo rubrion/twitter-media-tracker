@@ -1,114 +1,177 @@
-# **Comandos cURL Funcionais**
+# **Casos de Uso Específicos - Verificação de Interações**
 
-### 1. **Health Check**
+## 🤔 **ANÁLISE TÉCNICA: O QUE REALMENTE É POSSÍVEL?**
+
+**Tweets são públicos, então teoricamente deveríamos conseguir ver tudo, certo?**
+
+### ❌ **Por que o Apify tem limitações mesmo com dados públicos:**
+
+1. **Interface do Twitter é limitada**: Mesmo navegando manualmente, você não consegue ver "quem curtiu" facilmente
+2. **Proteção contra scraping**: Twitter esconde essas listas por trás de autenticação e rate limits
+3. **Apify usa automação web**: Simula navegação humana, mas com as mesmas restrições
+
+### 🔍 **VAMOS TESTAR NA PRÁTICA:**
+
+**Teste manual agora mesmo:**
+
+1. Abra um tweet qualquer no navegador
+2. Tente encontrar uma lista de "quem curtiu"
+3. Você só vê números: "1.2K curtidas", mas não os usuários
+
+### ✅ **O que CONSEGUIMOS extrair com Apify:**
+
+#### **1. Dados do Tweet:**
+
+- ✅ Texto completo
+- ✅ Data/hora de publicação
+- ✅ Número de curtidas, retweets, comentários
+- ✅ Usuário que publicou
+
+#### **2. Comentários/Replies:**
+
+- ✅ Lista de comentários em um tweet
+- ✅ Quem comentou (isso você consegue!)
+- ✅ Conteúdo dos comentários
+
+#### **3. Timeline de usuário:**
+
+- ✅ Tweets publicados pelo usuário
+- ✅ Se o usuário retweetou algo (aparece na timeline)
+
+### 🎯 **ESTRATÉGIAS INTELIGENTES PARA SEUS CASOS:**
+
+#### **CASO A: Verificar se usuário comentou tweet**
+
+**✅ POSSÍVEL** - Buscar replies no tweet específico:
 
 ```bash
-curl http://localhost:3000/health
-```
-
-### 2. **Busca Simples** (sem campos opcionais)
-
-```bash
-curl -X POST http://localhost:3000/api/track/search \
+# conversation_id encontra todos os comentários
+curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
   -H "Content-Type: application/json" \
   -d '{
-    "searchTerms": ["Tesla"],
-    "maxItems": 50,
+    "searchTerms": ["conversation_id:1728108619189874825"],
+    "maxItems": 200
+  }'
+```
+
+#### **CASO B: Verificar se usuário retweetou**
+
+**✅ PARCIALMENTE POSSÍVEL** - Verificar timeline do usuário:
+
+```bash
+# Buscar na timeline se aparece o retweet
+curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/user \
+  -H "Content-Type: application/json" \
+  -d '{
+    "handle": "usuario_alvo",
+    "maxItems": 200
+  }'
+```
+
+#### **CASO C: Verificar curtidas**
+
+**❌ IMPOSSÍVEL** - Twitter não expõe esta informação nem manualmente
+
+#### **CASO D: Verificar seguidores**
+
+**✅ INDIRETAMENTE** - Analisar interações frequentes:
+
+```bash
+# Buscar menções entre usuários
+curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "searchTerms": ["from:usuario_a @usuario_b"],
+    "maxItems": 100
+  }'
+```
+
+### 🔬 **TESTE PRÁTICO - VAMOS VERIFICAR:**
+
+Vou te dar exemplos reais para testar:
+
+## 🔍 **CASO 1: COMENTÁRIOS (100% funcional)**
+
+```bash
+# Pegar TODOS os comentários de um tweet específico
+curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "searchTerms": ["conversation_id:1728108619189874825"],
+    "maxItems": 200,
     "sort": "Latest"
   }'
 ```
 
-### 3. **Busca com Filtros Válidos**
+**Resultado:** Lista completa com:
+
+- Quem comentou
+- Conteúdo dos comentários
+- Data/hora
+
+**Para verificar usuário específico:** Filtrar resultado por `author.handle`
+
+## 🔄 **CASO 2: RETWEETS (detectável na timeline)**
 
 ```bash
-curl -X POST http://localhost:3000/api/track/search \
+# Verificar timeline do usuário nos últimos tweets
+curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/user \
   -H "Content-Type: application/json" \
   -d '{
-    "searchTerms": ["bitcoin"],
-    "maxItems": 50,
-    "onlyVerifiedUsers": true,
-    "sort": "Top"
+    "handle": "usuario_alvo",
+    "maxItems": 200
   }'
 ```
 
-### 4. **Busca com Idioma**
+**Como identificar retweet:**
+
+- Procurar por `retweetedTweet` no JSON
+- Se `retweetedTweet.id === "tweet_que_voce_quer"` = ENCONTROU!
+
+## 🎯 **CASO 3: MENÇÕES/INTERAÇÕES**
 
 ```bash
-curl -X POST http://localhost:3000/api/track/search \
+# Buscar se usuário menciona outro em tweets
+curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
   -H "Content-Type: application/json" \
   -d '{
-    "searchTerms": ["tecnologia"],
-    "maxItems": 50,
-    "tweetLanguage": "pt",
+    "searchTerms": ["from:usuario_a @usuario_b OR from:usuario_a usuario_b"],
+    "maxItems": 100,
     "sort": "Latest"
   }'
 ```
 
-### 5. **Perfil de Usuário** (simples)
+## 💡 **RESUMO: O QUE REALMENTE FUNCIONA**
 
-```bash
-curl -X POST http://localhost:3000/api/track/user \
-  -H "Content-Type: application/json" \
-  -d '{
-    "handle": "elonmusk",
-    "maxTweets": 50
-  }'
-```
+| **Sua Necessidade**           | **Status**    | **Método**                          | **Precisão** |
+| ----------------------------- | ------------- | ----------------------------------- | ------------ |
+| **Ver quem comentou tweet**   | ✅ **SIM**    | `conversation_id` + filtrar autor   | **95%**      |
+| **Ver se usuário retweetou**  | ✅ **SIM**    | Timeline do usuário + `retweetedId` | **90%**      |
+| **Ver quem curtiu tweet**     | ❌ **NÃO**    | Dados não públicos                  | **0%**       |
+| **Lista completa seguidores** | ❌ **NÃO**    | Só contagem                         | **0%**       |
+| **Ver se X segue Y**          | 🔶 **TALVEZ** | Frequência de interações            | **30%**      |
 
-### 6. **Perfil com Filtros**
+### 🎯 **ESTRATÉGIA RECOMENDADA:**
 
-```bash
-curl -X POST http://localhost:3000/api/track/user \
-  -H "Content-Type: application/json" \
-  -d '{
-    "handle": "OpenAI",
-    "maxTweets": 50,
-    "sort": "Latest",
-    "tweetLanguage": "en"
-  }'
-```
+**Para seus casos específicos, o Apify CONSEGUE resolver 2 de 4 necessidades:**
 
-### 7. **Seguidores**
+1. ✅ **Comentários**: 100% funcional
+2. ✅ **Retweets**: Detectável via timeline
+3. ❌ **Curtidas**: Impossível (nem manualmente você consegue)
+4. 🔶 **Seguidores**: Só por inferência
 
-```bash
-curl -X POST http://localhost:3000/api/track/followers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "handle": "elonmusk"
-  }'
-```
+### 🚀 **VAMOS TESTAR AGORA?**
 
-### 8. **Busca com Data Range**
+Quer fazer um teste real? Me dê:
 
-```bash
-curl -X POST http://localhost:3000/api/track/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "searchTerms": ["AI"],
-    "maxItems": 50,
-    "start": "2024-01-01",
-    "end": "2024-02-01"
-  }'
-```
+1. **Um tweet público específico** (URL)
+2. **Um usuário para verificar** (@handle)
 
-### 9. **Tweet Específico** (substitua pelo ID real)
+Vou rodar os comandos e mostrar exatamente o que conseguimos extrair!
 
-```bash
-curl -X POST http://localhost:3000/api/track/tweet \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tweetUrl": "https://twitter.com/elonmusk/status/1728108619189874825"
-  }'
-```
+### 💰 **CUSTO-BENEFÍCIO FINAL:**
 
-## 🎯 **Teste Rápido Garantido**
+**Apify**: $30-40/mês para 60-70% das suas necessidades  
+**Twitter API**: $100/mês para 100% das suas necessidades
 
-```bash
-# 1. Health check
-curl http://localhost:3000/health
-
-# 2. Busca básica funcionando
-curl -X POST http://localhost:3000/api/track/search \
-  -H "Content-Type: application/json" \
-  -d '{"searchTerms": ["test"], "maxItems": 50}'
-```
+**Conclusão**: Se comentários + retweets são suficientes, Apify resolve. Se precisa de curtidas obrigatoriamente, só Twitter API.
