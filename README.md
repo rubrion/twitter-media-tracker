@@ -7,12 +7,12 @@ Sistema para verificação de interações específicas no Twitter usando scrape
 ### Verificações Suportadas
 
 - **Seguidores**: verifica se um usuário segue uma página específica
+- **Retweets**: verifica se um usuário retweetou conteúdo de uma página (via análise da timeline)
 - **Comentários**: verifica se um usuário comentou em um tweet específico
 
 ### Limitações Técnicas
 
 - **Curtidas**: não detectáveis via scrapers (limitação da API do Twitter)
-- **Retweets**: removido devido à dificuldade de distinguir entre reposts e retweets tradicionais
 
 ## Deploy no Railway
 
@@ -46,18 +46,23 @@ POST /api/interactions/verify
 
 **Resposta:**
 
+````json
+**Resposta:**
 ```json
 {
   "success": true,
   "data": {
     "usuario": "username",
     "seguindo": true,
+    "retweetou": false,
     "comentou": false,
-    "score": 1,
+    "score": 33,
     "timestamp": "2024-01-01T10:00:00.000Z"
   }
 }
-```
+````
+
+````
 
 ### Outros Endpoints
 
@@ -99,7 +104,7 @@ POST /api/interactions/verify
 
 ```bash
 NODE_ENV=development npm run dev
-```
+````
 
 **Production**: Chamadas reais aos scrapers com otimizações
 

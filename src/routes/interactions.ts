@@ -65,7 +65,11 @@ router.post("/generate-examples", async (req, res) => {
       data: {
         timestamp: new Date().toISOString(),
         mode: "development",
-        examples: ["followers_of_target_page.json", "comments_example.json"],
+        examples: [
+          "followers_of_target_page.json",
+          "user_timeline_retweets.json",
+          "comments_example.json",
+        ],
       },
     });
   } catch (error) {
@@ -129,6 +133,7 @@ router.get("/status", (req, res) => {
       timestamp: new Date().toISOString(),
       capabilities: {
         seguindo: true,
+        retweetou: true,
         comentou: true,
         curtiu: false, // Limitação técnica
       },

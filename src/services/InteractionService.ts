@@ -23,6 +23,7 @@ export interface ProductionVerificationResult {
 
 export interface UserInteraction {
   seguindo: boolean;
+  retweetou: boolean;
   comentou: boolean;
   curtiu: null; // Sempre null - limitação técnica
 }
@@ -87,7 +88,15 @@ export class InteractionService {
       );
       await this.salvarExemplo("followers_of_target_page.json", followingData);
 
-      // 2. Gerar exemplo de comentários
+      // 2. Gerar exemplo de retweets do usuário
+      console.log("🔄 Obtendo timeline de retweets do usuário...");
+      const retweetData = await this.obterTimelineUsuarioParaRetweets(
+        testParams.usuario,
+        testParams.paginaAlvo
+      );
+      await this.salvarExemplo("user_timeline_retweets.json", retweetData);
+
+      // 3. Gerar exemplo de comentários
       console.log("💬 Obtendo comentários...");
       const comentariosData = await this.obterComentariosReal(
         testParams.tweetId
@@ -170,6 +179,9 @@ export class InteractionService {
       const followingData = await this.carregarExemplo(
         "followers_of_target_page.json"
       );
+      const retweetData = await this.carregarExemplo(
+        "user_timeline_retweets.json"
+      );
       const comentariosData = await this.carregarExemplo(
         "comments_example.json"
       );
@@ -180,6 +192,11 @@ export class InteractionService {
         paginaAlvo,
         followingData
       );
+      const retweetou = this.verificarRetweetNosExemplos(
+        usuario,
+        paginaAlvo,
+        retweetData
+      );
       const comentou = this.verificarComentarioNosExemplos(
         usuario,
         comentariosData
@@ -187,6 +204,7 @@ export class InteractionService {
 
       return {
         seguindo,
+        retweetou,
         comentou,
         curtiu: null,
       };
@@ -214,6 +232,12 @@ export class InteractionService {
       const { seguindo, seguidoresFromCache } =
         await this.verificarSeguidorComCache(usuario, paginaAlvo, timeFilter);
 
+      // Verificar retweets na timeline do usuário
+      const retweetou = await this.verificarRetweetNaTimeline(
+        usuario,
+        paginaAlvo
+      );
+
       // Verificar comentários com filtro temporal
       const comentou = await this.verificarComentarioComFiltroTemporal(
         usuario,
@@ -223,6 +247,7 @@ export class InteractionService {
 
       const interacoes: UserInteraction = {
         seguindo,
+        retweetou,
         comentou,
         curtiu: null,
       };
@@ -260,6 +285,23 @@ export class InteractionService {
   }
 
   /**
+   * Obter timeline do usuário para verificar retweets da página específica
+   * NOVA ESTRATÉGIA: Busca últimos tweets do usuário e verifica se há retweets da página alvo
+   */
+  private async obterTimelineUsuarioParaRetweets(
+    usuario: string,
+    paginaAlvo: string
+  ): Promise<any[]> {
+    const searchQuery = {
+      searchTerms: [`from:${usuario} filter:nativeretweets`],
+      maxItems: 50, // Últimos 50 tweets do usuário que são retweets
+    };
+
+    const timelineData = await this.apifyService.searchTweets(searchQuery);
+    return timelineData;
+  }
+
+  /**
    * Obter comentários do tweet (Tweet Scraper)
    * OTIMIZADO: Limitado para reduzir custos
    */
@@ -286,6 +328,41 @@ export class InteractionService {
       (user: TwitterUserScraperResult) =>
         user.userName.toLowerCase() === usuario.replace("@", "").toLowerCase()
     );
+  }
+
+  /**
+   * Verificar se usuário retweetou da página específica analisando sua timeline
+   * NOVA ESTRATÉGIA: Busca retweets na timeline do usuário da página alvo
+   */
+  private async verificarRetweetNaTimeline(
+    usuario: string,
+    paginaAlvo: string
+  ): Promise<boolean> {
+    console.log(
+      `🔄 Verificando retweets de ${usuario} da página ${paginaAlvo} na timeline`
+    );
+
+    const timelineData = await this.obterTimelineUsuarioParaRetweets(
+      usuario,
+      paginaAlvo
+    );
+
+    // Verificar se há tweets retweetados da página alvo
+    const retweetouPagina = timelineData.some((tweet) => {
+      // Verificar se o tweet original é da página alvo
+      return (
+        tweet.isRetweet &&
+        tweet.retweetedTweet?.author?.userName?.toLowerCase() ===
+          paginaAlvo.toLowerCase()
+      );
+    });
+
+    console.log(
+      `✅ Usuário ${usuario} ${
+        retweetouPagina ? "retweetou" : "NÃO retweetou"
+      } da página ${paginaAlvo}`
+    );
+    return retweetouPagina;
   }
 
   /**
@@ -403,6 +480,24 @@ export class InteractionService {
   }
 
   /**
+   * Verificar retweet nos exemplos salvos
+   * NOVA ESTRATÉGIA: Procura retweets da página alvo na timeline do usuário
+   */
+  private verificarRetweetNosExemplos(
+    usuario: string,
+    paginaAlvo: string,
+    timelineData: any[]
+  ): boolean {
+    return timelineData.some((tweet) => {
+      return (
+        tweet.isRetweet &&
+        tweet.retweetedTweet?.author?.userName?.toLowerCase() ===
+          paginaAlvo.toLowerCase()
+      );
+    });
+  }
+
+  /**
    * Verificar comentário nos exemplos salvos
    */
   private verificarComentarioNosExemplos(
@@ -420,9 +515,13 @@ export class InteractionService {
    * Calcular score de engajamento (0-100%)
    */
   private calcularScore(interacoes: UserInteraction): number {
-    const acoes = [interacoes.seguindo, interacoes.comentou];
+    const acoes = [
+      interacoes.seguindo,
+      interacoes.retweetou,
+      interacoes.comentou,
+    ];
     const positivas = acoes.filter(Boolean).length;
-    return Math.round((positivas / 2) * 100);
+    return Math.round((positivas / 3) * 100);
   }
 
   /**

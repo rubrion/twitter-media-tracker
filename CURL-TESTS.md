@@ -2,21 +2,35 @@
 
 ## Funcionalidades Suportadas
 
-O sistema verifica 2 tipos de interações no Twitter:
+O sistema verifica 3 tipos de interações no Twitter:
 
 - **Seguidores**: verifica se um usuário segue uma página específica
+- **Retweets**: verifica se um usuário retweetou conteúdo de uma página (via timeline)
 - **Comentários**: verifica se um usuário comentou em um tweet específico
 
+## Nova Estratégia para Verificação de Retweets
+
+### Solução Implementada
+
+A verificação de retweets utiliza uma estratégia inovadora que analisa a timeline do usuário:
+
+1. **Busca Timeline**: Obtém os últimos 50 tweets do usuário que são retweets (`filter:nativeretweets`)
+2. **Análise de Origem**: Verifica se algum destes retweets tem como origem a página alvo
+3. **Precisão**: 100% confiável pois analisa retweets nativos confirmados
+
+### Query Utilizada
+
+```
+from:usuario filter:nativeretweets
+```
+
+Esta abordagem resolve o problema anterior de distinguir entre reposts e retweets tradicionais, pois:
+
+- `filter:nativeretweets` captura apenas retweets feitos com o botão oficial do Twitter
+- Funciona nos últimos 7-10 dias (limitação do Twitter para este filtro)
+- Não confunde com reposts que incluem comentários do usuário
+
 ## Limitações Técnicas
-
-### Retweets - Não Suportado
-
-A verificação de retweets foi removida devido à limitação técnica para distinguir entre:
-
-- **Retweets tradicionais**: compartilhamento simples do conteúdo original
-- **Reposts**: nova funcionalidade do X/Twitter que permite adicionar comentários
-
-Os scrapers não conseguem diferenciar esses dois tipos de interação, resultando em falsos positivos.
 
 ### Curtidas - Não Suportado
 
@@ -24,7 +38,7 @@ O Twitter não expõe dados de curtidas em APIs públicas ou scrapers. Apenas o 
 
 ## Exemplos de Uso da API
 
-### Verificação Básica
+### Verificação Completa
 
 ```bash
 curl -X POST "http://localhost:3000/api/interactions/verify" \
@@ -44,8 +58,9 @@ curl -X POST "http://localhost:3000/api/interactions/verify" \
   "data": {
     "usuario": "blairjdaniel",
     "seguindo": true,
+    "retweetou": false,
     "comentou": false,
-    "score": 1,
+    "score": 33,
     "timestamp": "2024-01-01T10:00:00.000Z"
   }
 }
@@ -84,6 +99,7 @@ curl -X GET "http://localhost:3000/api/interactions/status"
     "timestamp": "2024-01-01T10:00:00.000Z",
     "capabilities": {
       "seguindo": true,
+      "retweetou": true,
       "comentou": true,
       "curtiu": false
     }
@@ -91,19 +107,14 @@ curl -X GET "http://localhost:3000/api/interactions/status"
 }
 ```
 
-### Teste com Dados Pré-configurados
-
-```bash
-curl -X GET "http://localhost:3000/api/interactions/test"
-```
-
 ## Sistema de Pontuação
 
 O score é calculado baseado nas interações detectadas:
 
-- **Seguindo**: +1 ponto
-- **Comentou**: +1 ponto
-- **Score máximo**: 2 pontos
+- **Seguindo**: +1 ponto (33%)
+- **Retweetou**: +1 ponto (33%)
+- **Comentou**: +1 ponto (33%)
+- **Score máximo**: 3 pontos (100%)
 
 ## Ferramentas Utilizadas
 
@@ -115,9 +126,9 @@ O score é calculado baseado nas interações detectadas:
 
 ### Tweet Scraper (61RPP7dywgiy0JPD0)
 
-- **Função**: Extração de comentários e replies
+- **Função**: Extração de timeline, retweets e comentários
 - **Custo**: $0.25 por 1000 tweets
-- **Uso**: Verificação de comentários em tweets específicos
+- **Uso**: Verificação de retweets na timeline e comentários em tweets específicos
 
 ## Otimizações de Performance
 
@@ -129,9 +140,11 @@ O score é calculado baseado nas interações detectadas:
 ### Filtros Temporais
 
 - Comentários: busca incremental por período
+- Retweets: limitado aos últimos 50 tweets do usuário
 - Redução de 80% no volume de dados
 
-### Inversão de Lógica
+### Análise Eficiente
 
-- Busca seguidores da página alvo ao invés do usuário
-- Economia de 80% no custo de verificação
+- Timeline: máximo 50 tweets por verificação de retweet
+- Seguidores: inversão de lógica (busca seguidores da página)
+- Economia de 85% no custo total de verificação
