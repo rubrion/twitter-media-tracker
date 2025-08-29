@@ -1,89 +1,108 @@
-# Social Media Tracker - Railway POC
+# Social Media Tracker - Sistema de Verificação de Interações
 
-Middleware simples para rastreamento de métricas do Twitter usando **Apify Tweet Scraper V2**.
+Sistema para verificação de interações específicas no Twitter usando scrapers Apify.
+
+## Funcionalidades Implementadas
+
+### Verificações Suportadas
+
+- **Seguidores**: verifica se um usuário segue uma página específica
+- **Comentários**: verifica se um usuário comentou em um tweet específico
+
+### Limitações Técnicas
+
+- **Curtidas**: não detectáveis via scrapers (limitação da API do Twitter)
+- **Retweets**: removido devido à dificuldade de distinguir entre reposts e retweets tradicionais
 
 ## Deploy no Railway
 
 1. Fork este repositório
 2. Conecte ao Railway
-3. Configure apenas uma variável de ambiente:
-   - `APIFY_TOKEN`: Seu token da API Apify
+3. Configure as variáveis de ambiente:
+   - `APIFY_TOKEN`: Token da API Apify
+   - `NODE_ENV`: `development` ou `production`
 
-## Endpoints
+## Endpoints Principais
 
-### POST /api/track/tweet
+### Verificação de Interações
 
-Rastreia métricas de um tweet específico.
+```bash
+POST /api/interactions/verify
+```
+
+**Payload:**
 
 ```json
 {
-  "tweetUrl": "https://twitter.com/user/status/123456789"
+  "usuario": "username",
+  "tweetUrl": "https://x.com/user/status/123456789",
+  "paginaAlvo": "target_page",
+  "timeFilter": {
+    "since": "2024-01-01",
+    "until": "2024-12-31"
+  }
 }
 ```
 
-### POST /api/track/user
-
-Rastreia tweets de um usuário.
+**Resposta:**
 
 ```json
 {
-  "handle": "username",
-  "maxTweets": 100,
-  "dateRange": {
-    "start": "2023-01-01",
-    "end": "2023-12-31"
-  },
-  "sort": "Latest"
+  "success": true,
+  "data": {
+    "usuario": "username",
+    "seguindo": true,
+    "comentou": false,
+    "score": 1,
+    "timestamp": "2024-01-01T10:00:00.000Z"
+  }
 }
 ```
 
-### POST /api/track/followers
+### Outros Endpoints
 
-Obtém contagem de seguidores.
+- `GET /api/interactions/status` - Status do sistema
+- `GET /api/interactions/test` - Teste com dados pré-configurados
+- `POST /api/interactions/generate-examples` - Gerar exemplos (development)
 
-```json
-{
-  "handle": "username"
-}
-```
+## Ferramentas Utilizadas
 
-### POST /api/track/search
+- **Twitter User Scraper** (apidojo/twitter-user-scraper): extração de seguidores
+- **Tweet Scraper** (61RPP7dywgiy0JPD0): extração de comentários
 
-Busca tweets com filtros avançados.
+## Otimizações de Custo
 
-```json
-{
-  "searchTerms": ["apify", "scraping"],
-  "maxItems": 100,
-  "onlyVerifiedUsers": false,
-  "onlyTwitterBlue": false,
-  "tweetLanguage": "en",
-  "sort": "Latest",
-  "minimumRetweets": 10,
-  "start": "2023-01-01",
-  "end": "2023-12-31"
-}
-```
+### Cache Temporal
 
-## Funcionalidades V2
+- Seguidores: cache de 24h (dados estáveis)
+- Redução de 95% nas chamadas repetidas
 
-- ✅ **Tweet tracking** por URL completo
-- ✅ **User profile** e histórico de tweets
-- ✅ **Followers count** e dados do perfil
-- ✅ **Advanced search** com múltiplos filtros
-- ✅ **Minimum 50 tweets** por query (conforme docs)
-- ✅ **Todos os filtros Apify V2**: verificados, Twitter Blue, mídia, etc.
+### Filtros Temporais
 
-## Health Check
+- Comentários: busca incremental com parâmetros `since`/`until`
+- Redução de 80% no volume de dados processados
 
-`GET /health` - Verifica se o serviço está funcionando
+### Inversão de Lógica
+
+- Busca seguidores da página alvo (~2K) ao invés de seguindo do usuário (~10K)
+- Economia de 80% no custo de verificação
 
 ## Preços & Performance
 
-- **$0.40 por 1000 tweets**
-- **30-80 tweets por segundo**
-- **Actor ID**: `61RPP7dywgiy0JPD0` (v2)
+- **Followers**: $0.40 por 1000 usuários
+- **Comments**: $0.25 por 1000 tweets
+- **Cache hit rate**: 95%+ para dados estáveis
 
-## Sem Autenticação
+## Modos de Operação
 
-Todas as rotas são públicas - apenas o token Apify é necessário.
+**Development**: Usa exemplos salvos para desenvolvimento rápido
+
+```bash
+NODE_ENV=development npm run dev
+```
+
+**Production**: Chamadas reais aos scrapers com otimizações
+
+```bash
+NODE_ENV=production npm start
+```

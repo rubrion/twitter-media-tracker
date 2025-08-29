@@ -1,6 +1,8 @@
+import "dotenv/config";
 import express from "express";
 import { config } from "./config";
 import trackingRoutes from "./routes/tracking";
+import interactionRoutes from "./routes/interactions";
 
 const app = express();
 
@@ -14,6 +16,7 @@ app.get("/health", (req, res) => {
 
 // Routes (no authentication needed)
 app.use("/api/track", trackingRoutes);
+app.use("/api/interactions", interactionRoutes);
 
 const PORT = process.env.PORT || 3000;
 

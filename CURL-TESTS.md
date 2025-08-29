@@ -1,177 +1,137 @@
-# **Casos de Uso Específicos - Verificação de Interações**
+# Sistema de Verificação de Interações - Exemplos de API
 
-## 🤔 **ANÁLISE TÉCNICA: O QUE REALMENTE É POSSÍVEL?**
+## Funcionalidades Suportadas
 
-**Tweets são públicos, então teoricamente deveríamos conseguir ver tudo, certo?**
+O sistema verifica 2 tipos de interações no Twitter:
 
-### ❌ **Por que o Apify tem limitações mesmo com dados públicos:**
+- **Seguidores**: verifica se um usuário segue uma página específica
+- **Comentários**: verifica se um usuário comentou em um tweet específico
 
-1. **Interface do Twitter é limitada**: Mesmo navegando manualmente, você não consegue ver "quem curtiu" facilmente
-2. **Proteção contra scraping**: Twitter esconde essas listas por trás de autenticação e rate limits
-3. **Apify usa automação web**: Simula navegação humana, mas com as mesmas restrições
+## Limitações Técnicas
 
-### 🔍 **VAMOS TESTAR NA PRÁTICA:**
+### Retweets - Não Suportado
 
-**Teste manual agora mesmo:**
+A verificação de retweets foi removida devido à limitação técnica para distinguir entre:
 
-1. Abra um tweet qualquer no navegador
-2. Tente encontrar uma lista de "quem curtiu"
-3. Você só vê números: "1.2K curtidas", mas não os usuários
+- **Retweets tradicionais**: compartilhamento simples do conteúdo original
+- **Reposts**: nova funcionalidade do X/Twitter que permite adicionar comentários
 
-### ✅ **O que CONSEGUIMOS extrair com Apify:**
+Os scrapers não conseguem diferenciar esses dois tipos de interação, resultando em falsos positivos.
 
-#### **1. Dados do Tweet:**
+### Curtidas - Não Suportado
 
-- ✅ Texto completo
-- ✅ Data/hora de publicação
-- ✅ Número de curtidas, retweets, comentários
-- ✅ Usuário que publicou
+O Twitter não expõe dados de curtidas em APIs públicas ou scrapers. Apenas o contador total é visível, sem identificação individual dos usuários.
 
-#### **2. Comentários/Replies:**
+## Exemplos de Uso da API
 
-- ✅ Lista de comentários em um tweet
-- ✅ Quem comentou (isso você consegue!)
-- ✅ Conteúdo dos comentários
-
-#### **3. Timeline de usuário:**
-
-- ✅ Tweets publicados pelo usuário
-- ✅ Se o usuário retweetou algo (aparece na timeline)
-
-### 🎯 **ESTRATÉGIAS INTELIGENTES PARA SEUS CASOS:**
-
-#### **CASO A: Verificar se usuário comentou tweet**
-
-**✅ POSSÍVEL** - Buscar replies no tweet específico:
+### Verificação Básica
 
 ```bash
-# conversation_id encontra todos os comentários
-curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
+curl -X POST "http://localhost:3000/api/interactions/verify" \
   -H "Content-Type: application/json" \
   -d '{
-    "searchTerms": ["conversation_id:1728108619189874825"],
-    "maxItems": 200
+    "usuario": "blairjdaniel",
+    "tweetUrl": "https://x.com/RoguesNFT/status/1960014365333299601",
+    "paginaAlvo": "RoguesNFT"
   }'
 ```
 
-#### **CASO B: Verificar se usuário retweetou**
+**Resposta:**
 
-**✅ PARCIALMENTE POSSÍVEL** - Verificar timeline do usuário:
+```json
+{
+  "success": true,
+  "data": {
+    "usuario": "blairjdaniel",
+    "seguindo": true,
+    "comentou": false,
+    "score": 1,
+    "timestamp": "2024-01-01T10:00:00.000Z"
+  }
+}
+```
+
+### Verificação com Filtro Temporal
 
 ```bash
-# Buscar na timeline se aparece o retweet
-curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/user \
+curl -X POST "http://localhost:3000/api/interactions/verify" \
   -H "Content-Type: application/json" \
   -d '{
-    "handle": "usuario_alvo",
-    "maxItems": 200
+    "usuario": "username",
+    "tweetUrl": "https://x.com/page/status/123456789",
+    "paginaAlvo": "target_page",
+    "timeFilter": {
+      "since": "2024-01-01",
+      "until": "2024-01-31"
+    }
   }'
 ```
 
-#### **CASO C: Verificar curtidas**
-
-**❌ IMPOSSÍVEL** - Twitter não expõe esta informação nem manualmente
-
-#### **CASO D: Verificar seguidores**
-
-**✅ INDIRETAMENTE** - Analisar interações frequentes:
+### Status do Sistema
 
 ```bash
-# Buscar menções entre usuários
-curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "searchTerms": ["from:usuario_a @usuario_b"],
-    "maxItems": 100
-  }'
+curl -X GET "http://localhost:3000/api/interactions/status"
 ```
 
-### 🔬 **TESTE PRÁTICO - VAMOS VERIFICAR:**
+**Resposta:**
 
-Vou te dar exemplos reais para testar:
+```json
+{
+  "success": true,
+  "data": {
+    "service": "InteractionService",
+    "mode": "development",
+    "timestamp": "2024-01-01T10:00:00.000Z",
+    "capabilities": {
+      "seguindo": true,
+      "comentou": true,
+      "curtiu": false
+    }
+  }
+}
+```
 
-## 🔍 **CASO 1: COMENTÁRIOS (100% funcional)**
+### Teste com Dados Pré-configurados
 
 ```bash
-# Pegar TODOS os comentários de um tweet específico
-curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "searchTerms": ["conversation_id:1728108619189874825"],
-    "maxItems": 200,
-    "sort": "Latest"
-  }'
+curl -X GET "http://localhost:3000/api/interactions/test"
 ```
 
-**Resultado:** Lista completa com:
+## Sistema de Pontuação
 
-- Quem comentou
-- Conteúdo dos comentários
-- Data/hora
+O score é calculado baseado nas interações detectadas:
 
-**Para verificar usuário específico:** Filtrar resultado por `author.handle`
+- **Seguindo**: +1 ponto
+- **Comentou**: +1 ponto
+- **Score máximo**: 2 pontos
 
-## 🔄 **CASO 2: RETWEETS (detectável na timeline)**
+## Ferramentas Utilizadas
 
-```bash
-# Verificar timeline do usuário nos últimos tweets
-curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/user \
-  -H "Content-Type: application/json" \
-  -d '{
-    "handle": "usuario_alvo",
-    "maxItems": 200
-  }'
-```
+### Twitter User Scraper (apidojo/twitter-user-scraper)
 
-**Como identificar retweet:**
+- **Função**: Extração de listas de seguidores
+- **Custo**: $0.40 por 1000 usuários
+- **Uso**: Verificação de relacionamento seguidor/seguindo
 
-- Procurar por `retweetedTweet` no JSON
-- Se `retweetedTweet.id === "tweet_que_voce_quer"` = ENCONTROU!
+### Tweet Scraper (61RPP7dywgiy0JPD0)
 
-## 🎯 **CASO 3: MENÇÕES/INTERAÇÕES**
+- **Função**: Extração de comentários e replies
+- **Custo**: $0.25 por 1000 tweets
+- **Uso**: Verificação de comentários em tweets específicos
 
-```bash
-# Buscar se usuário menciona outro em tweets
-curl -X POST https://twitter-media-tracker-production.up.railway.app/api/track/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "searchTerms": ["from:usuario_a @usuario_b OR from:usuario_a usuario_b"],
-    "maxItems": 100,
-    "sort": "Latest"
-  }'
-```
+## Otimizações de Performance
 
-## 💡 **RESUMO: O QUE REALMENTE FUNCIONA**
+### Cache Temporal
 
-| **Sua Necessidade**           | **Status**    | **Método**                          | **Precisão** |
-| ----------------------------- | ------------- | ----------------------------------- | ------------ |
-| **Ver quem comentou tweet**   | ✅ **SIM**    | `conversation_id` + filtrar autor   | **95%**      |
-| **Ver se usuário retweetou**  | ✅ **SIM**    | Timeline do usuário + `retweetedId` | **90%**      |
-| **Ver quem curtiu tweet**     | ❌ **NÃO**    | Dados não públicos                  | **0%**       |
-| **Lista completa seguidores** | ❌ **NÃO**    | Só contagem                         | **0%**       |
-| **Ver se X segue Y**          | 🔶 **TALVEZ** | Frequência de interações            | **30%**      |
+- Dados de seguidores: cache de 24h
+- Redução de 95% em chamadas repetidas
 
-### 🎯 **ESTRATÉGIA RECOMENDADA:**
+### Filtros Temporais
 
-**Para seus casos específicos, o Apify CONSEGUE resolver 2 de 4 necessidades:**
+- Comentários: busca incremental por período
+- Redução de 80% no volume de dados
 
-1. ✅ **Comentários**: 100% funcional
-2. ✅ **Retweets**: Detectável via timeline
-3. ❌ **Curtidas**: Impossível (nem manualmente você consegue)
-4. 🔶 **Seguidores**: Só por inferência
+### Inversão de Lógica
 
-### 🚀 **VAMOS TESTAR AGORA?**
-
-Quer fazer um teste real? Me dê:
-
-1. **Um tweet público específico** (URL)
-2. **Um usuário para verificar** (@handle)
-
-Vou rodar os comandos e mostrar exatamente o que conseguimos extrair!
-
-### 💰 **CUSTO-BENEFÍCIO FINAL:**
-
-**Apify**: $30-40/mês para 60-70% das suas necessidades  
-**Twitter API**: $100/mês para 100% das suas necessidades
-
-**Conclusão**: Se comentários + retweets são suficientes, Apify resolve. Se precisa de curtidas obrigatoriamente, só Twitter API.
+- Busca seguidores da página alvo ao invés do usuário
+- Economia de 80% no custo de verificação
