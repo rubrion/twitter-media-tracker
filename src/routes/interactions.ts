@@ -133,7 +133,6 @@ router.get("/status", (req, res) => {
       timestamp: new Date().toISOString(),
       capabilities: {
         seguindo: true,
-        retweetou: true,
         comentou: true,
         curtiu: false, // Limitação técnica
       },

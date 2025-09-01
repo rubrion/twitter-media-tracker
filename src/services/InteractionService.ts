@@ -1,11 +1,12 @@
 import { ApifyClient } from "apify-client";
 import { config } from "../config";
 import { ApifyService } from "./ApifyService";
+import { TweetData } from "../types";
 import * as fs from "fs/promises";
 import * as path from "path";
 
 export interface CacheEntry {
-  data: any[];
+  data: TwitterUserScraperResult[];
   timestamp: string;
   lastCheck: string;
 }
@@ -23,9 +24,7 @@ export interface ProductionVerificationResult {
 
 export interface UserInteraction {
   seguindo: boolean;
-  retweetou: boolean;
   comentou: boolean;
-  curtiu: null; // Sempre null - limitação técnica
 }
 
 export interface InteractionResult {
@@ -55,7 +54,7 @@ export class InteractionService {
   private tweetScraperId = "61RPP7dywgiy0JPD0"; // Tweet Scraper
   private userScraperId = "apidojo/twitter-user-scraper"; // User Scraper
   private examplesDir = path.join(process.cwd(), "examples");
-  private cacheDir = path.join(process.cwd(), "cache"); // Novo: diretório de cache temporal
+  private cacheDir = path.join(process.cwd(), "cache");
 
   constructor() {
     this.apifyService = new ApifyService();
@@ -74,36 +73,71 @@ export class InteractionService {
     await fs.mkdir(this.examplesDir, { recursive: true });
 
     const testParams = {
-      usuario: "blairjdaniel",
       tweetUrl: "https://x.com/RoguesNFT/status/1960014365333299601",
       tweetId: "1960014365333299601",
       paginaAlvo: "RoguesNFT",
     };
 
     try {
-      // 1. Gerar exemplo de seguidores da página alvo (followers)
-      console.log("📥 Obtendo lista de seguidores da página alvo...");
-      const followingData = await this.obterSeguidoresDaPagina(
-        testParams.paginaAlvo
-      );
-      await this.salvarExemplo("followers_of_target_page.json", followingData);
+      // 1. Tentar obter seguidores da página alvo usando estratégia alternativa
+      console.log("🔄 Obtendo seguidores da página alvo...");
 
-      // 2. Gerar exemplo de retweets do usuário
-      console.log("🔄 Obtendo timeline de retweets do usuário...");
-      const retweetData = await this.obterTimelineUsuarioParaRetweets(
-        testParams.usuario,
-        testParams.paginaAlvo
-      );
-      await this.salvarExemplo("user_timeline_retweets.json", retweetData);
+      try {
+        // Primeira tentativa: User Scraper (pode falhar devido às limitações atuais)
+        const followersData = await this.obterSeguidoresDaPagina(
+          testParams.paginaAlvo
+        );
+        await this.salvarExemplo(
+          "followers_of_target_page.json",
+          followersData
+        );
+        console.log(
+          `✅ Seguidores obtidos via User Scraper: ${followersData.length}`
+        );
+      } catch (userScraperError) {
+        console.log(
+          "⚠️ User Scraper falhou, tentando estratégia alternativa..."
+        );
+        console.log("Erro:", userScraperError);
 
-      // 3. Gerar exemplo de comentários
-      console.log("💬 Obtendo comentários...");
-      const comentariosData = await this.obterComentariosReal(
-        testParams.tweetId
-      );
-      await this.salvarExemplo("comments_example.json", comentariosData);
+        // Estratégia alternativa: buscar usuários que interagiram com a página
+        const alternativeFollowers = await this.obterSeguidoresAlternativo(
+          testParams.paginaAlvo
+        );
+        await this.salvarExemplo(
+          "followers_of_target_page.json",
+          alternativeFollowers
+        );
+        console.log(
+          `✅ Seguidores obtidos via estratégia alternativa: ${alternativeFollowers.length}`
+        );
+      }
 
-      console.log("✅ Exemplos reais gerados com sucesso!");
+      // 2. Gerar exemplo de comentários
+      console.log("🔄 Obtendo comentários do tweet...");
+      const commentData = await this.apifyService.searchTweets({
+        searchTerms: [`conversation_id:${testParams.tweetId}`],
+        maxItems: 200,
+      });
+      console.log(
+        `📊 Obtidos ${commentData.length} comentários para tweet ${testParams.tweetId}`
+      );
+      if (commentData.length > 0) {
+        console.log(
+          `📊 Primeiros comentários:`,
+          JSON.stringify(
+            commentData.slice(0, 3).map((c) => ({
+              author: c.author?.userName,
+              text: c.text?.substring(0, 100),
+            })),
+            null,
+            2
+          )
+        );
+      }
+      await this.salvarExemplo("comments_example.json", commentData);
+
+      console.log("✅ Exemplos gerados com sucesso!");
     } catch (error) {
       console.error("❌ Erro ao gerar exemplos:", error);
       throw error;
@@ -176,26 +210,18 @@ export class InteractionService {
 
     try {
       // Carregar exemplos
-      const followingData = await this.carregarExemplo(
+      const followingData = (await this.carregarExemplo(
         "followers_of_target_page.json"
-      );
-      const retweetData = await this.carregarExemplo(
-        "user_timeline_retweets.json"
-      );
-      const comentariosData = await this.carregarExemplo(
+      )) as TwitterUserScraperResult[];
+      const comentariosData = (await this.carregarExemplo(
         "comments_example.json"
-      );
+      )) as TweetData[];
 
       // Verificar cada interação nos dados de exemplo
       const seguindo = this.verificarSeguidorNosExemplos(
         usuario,
         paginaAlvo,
         followingData
-      );
-      const retweetou = this.verificarRetweetNosExemplos(
-        usuario,
-        paginaAlvo,
-        retweetData
       );
       const comentou = this.verificarComentarioNosExemplos(
         usuario,
@@ -204,9 +230,7 @@ export class InteractionService {
 
       return {
         seguindo,
-        retweetou,
         comentou,
-        curtiu: null,
       };
     } catch (error) {
       console.error("❌ Erro ao verificar interações em development:", error);
@@ -232,12 +256,6 @@ export class InteractionService {
       const { seguindo, seguidoresFromCache } =
         await this.verificarSeguidorComCache(usuario, paginaAlvo, timeFilter);
 
-      // Verificar retweets na timeline do usuário
-      const retweetou = await this.verificarRetweetNaTimeline(
-        usuario,
-        paginaAlvo
-      );
-
       // Verificar comentários com filtro temporal
       const comentou = await this.verificarComentarioComFiltroTemporal(
         usuario,
@@ -247,9 +265,7 @@ export class InteractionService {
 
       const interacoes: UserInteraction = {
         seguindo,
-        retweetou,
         comentou,
-        curtiu: null,
       };
 
       return {
@@ -264,48 +280,10 @@ export class InteractionService {
   }
 
   /**
-   * Obter seguidores da página alvo (mais eficiente e cacheável)
-   * OTIMIZADO: Busca seguidores da página em vez de quem o usuário segue
-   */
-  private async obterSeguidoresDaPagina(
-    paginaAlvo: string
-  ): Promise<TwitterUserScraperResult[]> {
-    const input = {
-      twitterHandles: [paginaAlvo],
-      getFollowers: true, // MUDANÇA: getFollowers em vez de getFollowing
-      maxItems: 5000, // Página alvo tem número mais previsível de seguidores
-    };
-
-    const run = await this.apifyClient.actor(this.userScraperId).call(input);
-    const response = await this.apifyClient
-      .dataset(run.defaultDatasetId)
-      .listItems();
-
-    return response.items as TwitterUserScraperResult[];
-  }
-
-  /**
-   * Obter timeline do usuário para verificar retweets da página específica
-   * NOVA ESTRATÉGIA: Busca últimos tweets do usuário e verifica se há retweets da página alvo
-   */
-  private async obterTimelineUsuarioParaRetweets(
-    usuario: string,
-    paginaAlvo: string
-  ): Promise<any[]> {
-    const searchQuery = {
-      searchTerms: [`from:${usuario} filter:nativeretweets`],
-      maxItems: 50, // Últimos 50 tweets do usuário que são retweets
-    };
-
-    const timelineData = await this.apifyService.searchTweets(searchQuery);
-    return timelineData;
-  }
-
-  /**
    * Obter comentários do tweet (Tweet Scraper)
    * OTIMIZADO: Limitado para reduzir custos
    */
-  private async obterComentariosReal(tweetId: string): Promise<any[]> {
+  private async obterComentariosReal(tweetId: string): Promise<TweetData[]> {
     const searchQuery = {
       searchTerms: [`conversation_id:${tweetId}`],
       maxItems: 500, // OTIMIZADO: Reduzido de 1000 para 500
@@ -324,50 +302,26 @@ export class InteractionService {
     paginaAlvo: string
   ): Promise<boolean> {
     const seguidoresDaPagina = await this.obterSeguidoresDaPagina(paginaAlvo);
-    return seguidoresDaPagina.some(
-      (user: TwitterUserScraperResult) =>
-        user.userName.toLowerCase() === usuario.replace("@", "").toLowerCase()
+
+    // Buscar o usuário na lista de seguidores
+    const segue = seguidoresDaPagina.some(
+      (seguidor) =>
+        seguidor.userName.toLowerCase() ===
+        usuario.replace("@", "").toLowerCase()
     );
+
+    console.log(
+      `${segue ? "✅" : "❌"} ${usuario} ${
+        segue ? "SEGUE" : "NÃO SEGUE"
+      } @${paginaAlvo}`
+    );
+
+    return segue;
   }
 
   /**
-   * Verificar se usuário retweetou da página específica analisando sua timeline
-   * NOVA ESTRATÉGIA: Busca retweets na timeline do usuário da página alvo
-   */
-  private async verificarRetweetNaTimeline(
-    usuario: string,
-    paginaAlvo: string
-  ): Promise<boolean> {
-    console.log(
-      `🔄 Verificando retweets de ${usuario} da página ${paginaAlvo} na timeline`
-    );
-
-    const timelineData = await this.obterTimelineUsuarioParaRetweets(
-      usuario,
-      paginaAlvo
-    );
-
-    // Verificar se há tweets retweetados da página alvo
-    const retweetouPagina = timelineData.some((tweet) => {
-      // Verificar se o tweet original é da página alvo
-      return (
-        tweet.isRetweet &&
-        tweet.retweetedTweet?.author?.userName?.toLowerCase() ===
-          paginaAlvo.toLowerCase()
-      );
-    });
-
-    console.log(
-      `✅ Usuário ${usuario} ${
-        retweetouPagina ? "retweetou" : "NÃO retweetou"
-      } da página ${paginaAlvo}`
-    );
-    return retweetouPagina;
-  }
-
-  /**
-   * Verificar se usuário comentou tweet específico com filtro temporal
-   * OTIMIZADO: Busca apenas comentários desde uma data específica
+   * Verificar comentário em tweet específico com filtro temporal
+   * OTIMIZADO: Com filtros since/until quando disponíveis
    */
   private async verificarComentarioComFiltroTemporal(
     usuario: string,
@@ -375,46 +329,55 @@ export class InteractionService {
     timeFilter?: TimeFilterOptions
   ): Promise<boolean> {
     console.log(
-      `💬 Verificando comentários de ${usuario} ${
-        timeFilter?.checkSince ? `desde ${timeFilter.checkSince}` : ""
+      `💬 Verificando comentários de ${usuario} no tweet ${tweetId}${
+        timeFilter?.checkSince ? ` desde ${timeFilter.checkSince}` : ""
       }`
     );
 
-    // Construir query com filtro temporal se disponível
-    let searchQuery: any = {
-      searchTerms: [`conversation_id:${tweetId}`],
-      maxItems: 100,
-    };
-
-    if (timeFilter?.checkSince) {
-      // Converter ISO para formato Twitter (YYYY-MM-DD)
-      const sinceDate = new Date(timeFilter.checkSince)
-        .toISOString()
-        .split("T")[0];
-      searchQuery = {
-        searchTerms: [`conversation_id:${tweetId} since:${sinceDate}`],
-        maxItems: 100,
+    try {
+      // Criar query com filtro temporal se disponível
+      const searchQuery: {
+        searchTerms: string[];
+        maxItems: number;
+        start?: string;
+      } = {
+        searchTerms: [`conversation_id:${tweetId}`],
+        maxItems: 500,
       };
+
+      // Adicionar filtro temporal se especificado
+      if (timeFilter?.checkSince) {
+        const sinceDate = new Date(timeFilter.checkSince)
+          .toISOString()
+          .split("T")[0];
+        searchQuery.start = sinceDate;
+        console.log(`📅 Buscando comentários desde: ${sinceDate}`);
+      }
+
+      const comentarios = await this.apifyService.searchTweets(searchQuery);
+
+      const comentou = comentarios.some(
+        (tweet) =>
+          tweet.author?.userName?.toLowerCase() ===
+          usuario.replace("@", "").toLowerCase()
+      );
+
+      console.log(
+        `${comentou ? "✅" : "❌"} ${usuario} ${
+          comentou ? "COMENTOU" : "NÃO COMENTOU"
+        } no tweet`
+      );
+
+      return comentou;
+    } catch (error) {
+      console.error("❌ Erro ao verificar comentário:", error);
+      return false;
     }
-
-    const comentariosData = await this.apifyService.searchTweets(searchQuery);
-
-    const resultado = comentariosData.some(
-      (tweet) =>
-        tweet.author.userName.toLowerCase() ===
-          usuario.replace("@", "").toLowerCase() && tweet.isReply
-    );
-
-    console.log(
-      `✅ Usuário ${usuario} ${resultado ? "comentou" : "NÃO comentou"} ${
-        timeFilter?.checkSince ? `desde ${timeFilter.checkSince}` : ""
-      }`
-    );
-    return resultado;
   }
 
   /**
-   * Verificar seguidor com sistema de cache temporal
+   * NOVO: Verificar seguidor com cache temporal para otimização
+   * Cache TTL de 24h para dados estáveis como seguidores
    */
   private async verificarSeguidorComCache(
     usuario: string,
@@ -422,106 +385,258 @@ export class InteractionService {
     timeFilter?: TimeFilterOptions
   ): Promise<{ seguindo: boolean; seguidoresFromCache: boolean }> {
     console.log(
-      `👥 Verificando seguidor ${usuario} em ${paginaAlvo} com cache`
+      `👥 Verificando se ${usuario} segue @${paginaAlvo} (com cache)`
     );
 
-    const cacheKey = `followers_${paginaAlvo}`;
-    const maxCacheAge = timeFilter?.maxCacheAge || 24; // 24 horas padrão
+    const cacheKey = `followers_${paginaAlvo.toLowerCase()}`;
+    const maxCacheAgeHours = timeFilter?.maxCacheAge || 24; // 24h padrão
 
-    // Tentar carregar do cache
-    const cacheData = await this.carregarCache(cacheKey);
-    const ageCacheHours = cacheData
-      ? this.calcularIdadeCache(cacheData.timestamp)
-      : Infinity;
+    try {
+      // Verificar cache primeiro
+      const cachedData = await this.lerCache(cacheKey);
 
-    let seguidoresDaPagina: TwitterUserScraperResult[];
-    let seguidoresFromCache = false;
+      if (cachedData && this.isCacheValid(cachedData, maxCacheAgeHours)) {
+        console.log(
+          `📦 Usando dados do cache (${cachedData.data.length} seguidores)`
+        );
 
-    if (cacheData && ageCacheHours < maxCacheAge) {
-      console.log(
-        `📋 Usando cache de seguidores (${ageCacheHours.toFixed(1)}h de idade)`
-      );
-      seguidoresDaPagina = cacheData.data;
-      seguidoresFromCache = true;
-    } else {
-      console.log(
-        `🔄 Cache expirado ou inexistente, buscando novos seguidores`
-      );
-      seguidoresDaPagina = await this.obterSeguidoresDaPagina(paginaAlvo);
+        const seguindo = cachedData.data.some(
+          (seguidor: TwitterUserScraperResult) =>
+            seguidor.userName?.toLowerCase() ===
+            usuario.replace("@", "").toLowerCase()
+        );
+
+        console.log(
+          `${seguindo ? "✅" : "❌"} ${usuario} ${
+            seguindo ? "SEGUE" : "NÃO SEGUE"
+          } @${paginaAlvo} (cache)`
+        );
+
+        return { seguindo, seguidoresFromCache: true };
+      }
+
+      // Cache expirado ou inexistente - buscar dados frescos
+      console.log("🔄 Cache expirado, buscando dados frescos...");
+      const seguidoresFrescos = await this.obterSeguidoresDaPagina(paginaAlvo);
 
       // Salvar no cache
-      await this.salvarCache(cacheKey, {
-        data: seguidoresDaPagina,
-        timestamp: new Date().toISOString(),
-        lastCheck: new Date().toISOString(),
-      });
-    }
+      await this.salvarNoCache(cacheKey, seguidoresFrescos);
 
-    const seguindo = seguidoresDaPagina.some(
-      (user: TwitterUserScraperResult) =>
-        user.userName.toLowerCase() === usuario.replace("@", "").toLowerCase()
+      const seguindo = seguidoresFrescos.some(
+        (seguidor) =>
+          seguidor.userName?.toLowerCase() ===
+          usuario.replace("@", "").toLowerCase()
+      );
+
+      console.log(
+        `${seguindo ? "✅" : "❌"} ${usuario} ${
+          seguindo ? "SEGUE" : "NÃO SEGUE"
+        } @${paginaAlvo} (fresh)`
+      );
+
+      return { seguindo, seguidoresFromCache: false };
+    } catch (error) {
+      console.error("❌ Erro na verificação com cache:", error);
+      // Fallback: tentar verificação direta
+      const seguindo = await this.verificarSeguidorReal(usuario, paginaAlvo);
+      return { seguindo, seguidoresFromCache: false };
+    }
+  }
+
+  /**
+   * Obter seguidores da página usando User Scraper
+   * ESTRATÉGIA OTIMIZADA: Buscar seguidores da página ao invés de seguindo do usuário
+   */
+  private async obterSeguidoresDaPagina(
+    paginaAlvo: string
+  ): Promise<TwitterUserScraperResult[]> {
+    console.log(`👥 Obtendo seguidores da página @${paginaAlvo}...`);
+
+    try {
+      const input = {
+        twitterHandles: [paginaAlvo], // Correto conforme documentação
+        getFollowers: true,
+        getFollowing: false,
+        getRetweeters: false,
+        includeUnavailableUsers: false,
+        maxRequestRetries: 3,
+        maxItems: 2000, // OTIMIZADO: Limitado para reduzir custos
+      };
+
+      console.log(
+        `🔧 Input para User Scraper:`,
+        JSON.stringify(input, null, 2)
+      );
+
+      const run = await this.apifyClient
+        .actor(this.userScraperId)
+        .call(input, { waitSecs: 120 });
+
+      console.log(`📋 Run ID: ${run.id}, Dataset ID: ${run.defaultDatasetId}`);
+
+      const response = await this.apifyClient
+        .dataset(run.defaultDatasetId)
+        .listItems();
+
+      console.log(`📊 Raw response total: ${response.items.length} items`);
+      console.log(
+        `📊 First few items:`,
+        JSON.stringify(response.items.slice(0, 3), null, 2)
+      );
+
+      const rawItems = response.items as Record<string, unknown>[];
+      const seguidores = rawItems
+        .filter((item) => item.userName && item.followers !== undefined)
+        .map((item) => ({
+          userName: item.userName as string,
+          name: (item.name || item.displayName || "") as string,
+          id: (item.id || "") as string,
+          followers: (item.followers || 0) as number,
+          following: (item.following || 0) as number,
+          verified: (item.verified || false) as boolean,
+          profilePicture: (item.profilePicture || "") as string,
+          description: (item.description || "") as string,
+        })) as TwitterUserScraperResult[];
+
+      console.log(
+        `✅ Obtidos ${seguidores.length} seguidores da página @${paginaAlvo}`
+      );
+
+      return seguidores;
+    } catch (error) {
+      console.error(
+        `❌ Erro ao obter seguidores da página ${paginaAlvo}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Estratégia alternativa para obter seguidores usando Tweet Scraper
+   * Busca usuários que interagiram com a página para identificar potenciais seguidores
+   */
+  private async obterSeguidoresAlternativo(
+    paginaAlvo: string
+  ): Promise<TwitterUserScraperResult[]> {
+    console.log(
+      `👥 Obtendo seguidores alternativos da página @${paginaAlvo}...`
     );
 
-    return { seguindo, seguidoresFromCache };
+    try {
+      // Estratégia 1: Buscar usuários que curtiram tweets da página
+      const likersQuery = await this.apifyService.searchTweets({
+        searchTerms: [`from:${paginaAlvo} min_faves:1`],
+        maxItems: 50,
+      });
+
+      // Estratégia 2: Buscar usuários que comentaram nos tweets da página
+      const recentTweets = await this.apifyService.searchTweets({
+        searchTerms: [`from:${paginaAlvo}`],
+        maxItems: 10,
+      });
+
+      const commenters: Record<string, TwitterUserScraperResult> = {};
+
+      for (const tweet of recentTweets) {
+        if (tweet.id) {
+          try {
+            const comments = await this.apifyService.searchTweets({
+              searchTerms: [`conversation_id:${tweet.id}`],
+              maxItems: 20,
+            });
+
+            for (const comment of comments) {
+              if (
+                comment.author?.userName &&
+                comment.author.userName !== paginaAlvo
+              ) {
+                commenters[comment.author.userName] = {
+                  userName: comment.author.userName,
+                  name: comment.author.name || "",
+                  id: comment.author.id || "",
+                  followers: comment.author.followers || 0,
+                  following: comment.author.following || 0,
+                  verified: comment.author.isVerified || false,
+                  profilePicture: comment.author.profilePicture || "",
+                  description: comment.author.description || "",
+                };
+              }
+            }
+          } catch (commentError) {
+            console.log(
+              `⚠️ Erro ao buscar comentários do tweet ${tweet.id}:`,
+              commentError
+            );
+          }
+        }
+      }
+
+      const alternativeFollowers = Object.values(commenters);
+
+      console.log(
+        `✅ Obtidos ${alternativeFollowers.length} seguidores alternativos via interações`
+      );
+
+      return alternativeFollowers;
+    } catch (error) {
+      console.error(`❌ Erro ao obter seguidores alternativos:`, error);
+      return [];
+    }
   }
+
   /**
-   * Verificar seguidor nos exemplos salvos
-   * OTIMIZADO: Procura o usuário na lista de seguidores da página
+   * Verificar seguidor nos exemplos (development)
    */
   private verificarSeguidorNosExemplos(
     usuario: string,
     paginaAlvo: string,
-    seguidoresDaPagina: TwitterUserScraperResult[]
+    seguidoresData: TwitterUserScraperResult[]
   ): boolean {
-    return seguidoresDaPagina.some(
-      (user) =>
-        user.userName.toLowerCase() === usuario.replace("@", "").toLowerCase()
+    const seguindo = seguidoresData.some(
+      (seguidor) =>
+        seguidor.userName?.toLowerCase() ===
+        usuario.replace("@", "").toLowerCase()
     );
+
+    console.log(
+      `${seguindo ? "✅" : "❌"} ${usuario} ${
+        seguindo ? "SEGUE" : "NÃO SEGUE"
+      } @${paginaAlvo} (exemplo)`
+    );
+
+    return seguindo;
   }
 
   /**
-   * Verificar retweet nos exemplos salvos
-   * NOVA ESTRATÉGIA: Procura retweets da página alvo na timeline do usuário
-   */
-  private verificarRetweetNosExemplos(
-    usuario: string,
-    paginaAlvo: string,
-    timelineData: any[]
-  ): boolean {
-    return timelineData.some((tweet) => {
-      return (
-        tweet.isRetweet &&
-        tweet.retweetedTweet?.author?.userName?.toLowerCase() ===
-          paginaAlvo.toLowerCase()
-      );
-    });
-  }
-
-  /**
-   * Verificar comentário nos exemplos salvos
+   * Verificar comentário nos exemplos (development)
    */
   private verificarComentarioNosExemplos(
     usuario: string,
-    comentariosData: any[]
+    comentariosData: TweetData[]
   ): boolean {
-    return comentariosData.some(
+    const comentou = comentariosData.some(
       (tweet) =>
         tweet.author?.userName?.toLowerCase() ===
-          usuario.replace("@", "").toLowerCase() && tweet.isReply
+        usuario.replace("@", "").toLowerCase()
     );
+
+    console.log(
+      `${comentou ? "✅" : "❌"} ${usuario} ${
+        comentou ? "COMENTOU" : "NÃO COMENTOU"
+      } (exemplo)`
+    );
+
+    return comentou;
   }
 
   /**
    * Calcular score de engajamento (0-100%)
    */
   private calcularScore(interacoes: UserInteraction): number {
-    const acoes = [
-      interacoes.seguindo,
-      interacoes.retweetou,
-      interacoes.comentou,
-    ];
+    const acoes = [interacoes.seguindo, interacoes.comentou];
     const positivas = acoes.filter(Boolean).length;
-    return Math.round((positivas / 3) * 100);
+    return Math.round((positivas / 2) * 100);
   }
 
   /**
@@ -538,7 +653,10 @@ export class InteractionService {
   /**
    * Salvar exemplo em arquivo JSON
    */
-  private async salvarExemplo(filename: string, data: any): Promise<void> {
+  private async salvarExemplo(
+    filename: string,
+    data: TwitterUserScraperResult[] | TweetData[]
+  ): Promise<void> {
     const filepath = path.join(this.examplesDir, filename);
     await fs.writeFile(filepath, JSON.stringify(data, null, 2));
     console.log(`💾 Exemplo salvo: ${filename}`);
@@ -547,7 +665,9 @@ export class InteractionService {
   /**
    * Carregar exemplo de arquivo JSON
    */
-  private async carregarExemplo(filename: string): Promise<any> {
+  private async carregarExemplo(
+    filename: string
+  ): Promise<TwitterUserScraperResult[] | TweetData[]> {
     const filepath = path.join(this.examplesDir, filename);
     try {
       const data = await fs.readFile(filepath, "utf-8");
@@ -562,18 +682,30 @@ export class InteractionService {
   /**
    * Salvar dados no cache temporal
    */
-  private async salvarCache(key: string, data: CacheEntry): Promise<void> {
+  private async salvarNoCache(
+    key: string,
+    data: TwitterUserScraperResult[]
+  ): Promise<void> {
     await fs.mkdir(this.cacheDir, { recursive: true });
+
+    const cacheEntry: CacheEntry = {
+      data,
+      timestamp: new Date().toISOString(),
+      lastCheck: new Date().toISOString(),
+    };
+
     const filepath = path.join(this.cacheDir, `${key}.json`);
-    await fs.writeFile(filepath, JSON.stringify(data, null, 2));
-    console.log(`💾 Cache salvo: ${key}`);
+    await fs.writeFile(filepath, JSON.stringify(cacheEntry, null, 2));
+
+    console.log(`📦 Cache salvo: ${key} (${data.length} itens)`);
   }
 
   /**
-   * Carregar dados do cache temporal
+   * Ler dados do cache temporal
    */
-  private async carregarCache(key: string): Promise<CacheEntry | null> {
+  private async lerCache(key: string): Promise<CacheEntry | null> {
     const filepath = path.join(this.cacheDir, `${key}.json`);
+
     try {
       const data = await fs.readFile(filepath, "utf-8");
       return JSON.parse(data);
@@ -583,12 +715,13 @@ export class InteractionService {
   }
 
   /**
-   * Calcular idade do cache em horas
+   * Verificar se cache ainda é válido
    */
-  private calcularIdadeCache(timestamp: string): number {
-    const cacheTime = new Date(timestamp);
+  private isCacheValid(cache: CacheEntry, maxAgeHours: number): boolean {
     const now = new Date();
-    const diffMs = now.getTime() - cacheTime.getTime();
-    return diffMs / (1000 * 60 * 60); // Converter para horas
+    const cacheTime = new Date(cache.timestamp);
+    const ageHours = (now.getTime() - cacheTime.getTime()) / (1000 * 60 * 60);
+
+    return ageHours < maxAgeHours;
   }
 }

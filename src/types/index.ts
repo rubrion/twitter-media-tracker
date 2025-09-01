@@ -1,5 +1,12 @@
 // Apify Tweet Scraper V2 Types
 
+export interface MediaEntity {
+  type: string;
+  url: string;
+  mediaUrl?: string;
+  [key: string]: unknown;
+}
+
 export interface TweetAuthor {
   type: string;
   userName: string;
@@ -43,8 +50,8 @@ export interface TweetData {
   isRetweet: boolean;
   isQuote: boolean;
   author: TweetAuthor;
-  extendedEntities?: any;
-  media?: any[];
+  extendedEntities?: Record<string, unknown>;
+  media?: MediaEntity[];
 }
 
 export interface TrackTweetOptions {
@@ -104,7 +111,7 @@ export interface ApifyDatasetItems {
   items: TweetData[];
 }
 
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -115,10 +122,10 @@ export function isTweetData(data: unknown): data is TweetData {
   return (
     typeof data === "object" &&
     data !== null &&
-    typeof (data as any).id === "string" &&
-    typeof (data as any).text === "string" &&
-    typeof (data as any).author === "object" &&
-    (data as any).author !== null
+    typeof (data as Record<string, unknown>).id === "string" &&
+    typeof (data as Record<string, unknown>).text === "string" &&
+    typeof (data as Record<string, unknown>).author === "object" &&
+    (data as Record<string, unknown>).author !== null
   );
 }
 
@@ -126,8 +133,8 @@ export function isTweetAuthor(data: unknown): data is TweetAuthor {
   return (
     typeof data === "object" &&
     data !== null &&
-    typeof (data as any).userName === "string" &&
-    typeof (data as any).followers === "number"
+    typeof (data as Record<string, unknown>).userName === "string" &&
+    typeof (data as Record<string, unknown>).followers === "number"
   );
 }
 
