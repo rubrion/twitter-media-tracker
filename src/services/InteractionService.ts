@@ -199,6 +199,77 @@ export class InteractionService {
   }
 
   /**
+ * Verificar se o usuário segue uma página alvo
+ */
+async verificarSeguidor(
+  usuario: string,
+  paginaAlvo: string
+): Promise<{ usuario: string; paginaAlvo: string; segue: boolean }> {
+  const isDevelopment = config.app.env === "development";
+
+  console.log(
+    `🔍 Verificando se ${usuario} segue ${paginaAlvo} (modo: ${
+      isDevelopment ? "development" : "production"
+    })`
+  );
+
+  let segue = false;
+
+  if (isDevelopment) {
+    segue = await this.verificarSeguidorDevelopment(usuario, paginaAlvo);
+  } else {
+    segue = await this.verificarSeguidorProduction(usuario, paginaAlvo);
+  }
+
+  return {
+    usuario,
+    paginaAlvo,
+    segue,
+  };
+}
+
+/**
+ * Verificar se o usuário comentou em um tweet
+ */
+async verificarComentario(
+  usuario: string,
+  tweetUrl: string,
+  timeFilter?: TimeFilterOptions
+): Promise<{ usuario: string; tweetUrl: string; comentou: boolean; newDataSince?: string }> {
+  const isDevelopment = config.app.env === "development";
+
+  console.log(
+    `💬 Verificando comentário de ${usuario} em ${tweetUrl} (modo: ${
+      isDevelopment ? "development" : "production"
+    })${timeFilter?.checkSince ? ` desde: ${timeFilter.checkSince}` : ""}`
+  );
+
+  let comentou = false;
+  let newDataSince: string | undefined;
+
+  if (isDevelopment) {
+    // mock de ambiente de desenvolvimento
+    comentou = await this.verificarComentarioDevelopment(usuario, tweetUrl);
+  } else {
+    const result = await this.verificarComentarioProduction(
+      usuario,
+      tweetUrl,
+      timeFilter
+    );
+    comentou = result.comentou;
+    newDataSince = result.newDataSince;
+  }
+
+  return {
+    usuario,
+    tweetUrl,
+    comentou,
+    newDataSince,
+  };
+}
+
+
+  /**
    * Verificar interações usando exemplos salvos (development)
    */
   private async verificarInteracoesDevelopment(
@@ -234,6 +305,52 @@ export class InteractionService {
       };
     } catch (error) {
       console.error("❌ Erro ao verificar interações em development:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verificar SEGUIDOR usando exemplos salvos (development)
+   */
+  private async verificarSeguidorDevelopment(
+    usuario: string,
+    paginaAlvo: string
+  ): Promise<boolean> {
+    console.log("📂 Carregando dados de exemplo (seguidores)...");
+
+    try {
+      const followingData = (await this.carregarExemplo(
+        "followers_of_target_page.json"
+      )) as TwitterUserScraperResult[];
+
+      return this.verificarSeguidorNosExemplos(
+        usuario,
+        paginaAlvo,
+        followingData
+      );
+    } catch (error) {
+      console.error("❌ Erro ao verificar seguidor em development:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verificar COMENTÁRIO usando exemplos salvos (development)
+   */
+  private async verificarComentarioDevelopment(
+    usuario: string,
+    tweetUrl: string
+  ): Promise<boolean> {
+    console.log("📂 Carregando dados de exemplo (comentários)...");
+
+    try {
+      const comentariosData = (await this.carregarExemplo(
+        "comments_example.json"
+      )) as TweetData[];
+
+      return this.verificarComentarioNosExemplos(usuario, comentariosData);
+    } catch (error) {
+      console.error("❌ Erro ao verificar comentário em development:", error);
       throw error;
     }
   }
@@ -278,6 +395,57 @@ export class InteractionService {
       throw error;
     }
   }
+
+    /**
+   * Verificar SEGUIDOR fazendo chamadas reais (production) com cache temporal
+   */
+  private async verificarSeguidorProduction(
+    usuario: string,
+    paginaAlvo: string
+  ): Promise<boolean> {
+    console.log("🌐 Verificando seguidor em produção...");
+
+    try {
+      const { seguindo } = await this.verificarSeguidorComCache(
+        usuario,
+        paginaAlvo
+      );
+      return seguindo;
+    } catch (error) {
+      console.error("❌ Erro ao verificar seguidor em production:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verificar COMENTÁRIO fazendo chamadas reais (production) com filtro temporal
+   */
+  private async verificarComentarioProduction(
+    usuario: string,
+    tweetUrl: string,
+    timeFilter?: TimeFilterOptions
+  ): Promise<{ comentou: boolean; newDataSince?: string }> {
+    console.log("🌐 Verificando comentário em produção...");
+
+    try {
+      const tweetId = this.extrairTweetId(tweetUrl);
+
+      const comentou = await this.verificarComentarioComFiltroTemporal(
+        usuario,
+        tweetId,
+        timeFilter
+      );
+
+      return {
+        comentou,
+        newDataSince: timeFilter?.checkSince,
+      };
+    } catch (error) {
+      console.error("❌ Erro ao verificar comentário em production:", error);
+      throw error;
+    }
+  }
+
 
   /**
    * Obter comentários do tweet (Tweet Scraper)

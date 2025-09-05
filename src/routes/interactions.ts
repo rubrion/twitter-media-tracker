@@ -50,6 +50,70 @@ router.post("/verify", async (req, res) => {
 });
 
 /**
+ * POST /api/interactions/verify/follower
+ * Verificar se um usuário segue uma página específica
+ */
+router.post("/verify/follower", async (req, res) => {
+  try {
+    const { usuario, paginaAlvo } = req.body;
+
+    if (!usuario || !paginaAlvo) {
+      return res.status(400).json({
+        success: false,
+        error: "Parâmetros obrigatórios: usuario, paginaAlvo",
+      });
+    }
+
+    console.log(`🔍 Verificando se ${usuario} segue ${paginaAlvo}`);
+
+    const resultado = await interactionService.verificarSeguidor(usuario, paginaAlvo);
+
+    return res.json({
+      success: true,
+      data: resultado,
+    });
+  } catch (error) {
+    console.error("❌ Erro ao verificar seguidor:", error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Erro interno do servidor",
+    });
+  }
+});
+
+/**
+ * POST /api/interactions/verify/comment
+ * Verificar se um usuário comentou em um tweet
+ */
+router.post("/verify/comment", async (req, res) => {
+  try {
+    const { usuario, tweetUrl, timeFilter } = req.body;
+
+    if (!usuario || !tweetUrl) {
+      return res.status(400).json({
+        success: false,
+        error: "Parâmetros obrigatórios: usuario, tweetUrl",
+      });
+    }
+
+    console.log(`💬 Verificando comentário de ${usuario} em ${tweetUrl}`);
+
+    const resultado = await interactionService.verificarComentario(usuario, tweetUrl, timeFilter);
+
+    return res.json({
+      success: true,
+      data: resultado,
+    });
+  } catch (error) {
+    console.error("❌ Erro ao verificar comentário:", error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Erro interno do servidor",
+    });
+  }
+});
+
+/**
  * POST /api/interactions/generate-examples
  * Gerar exemplos reais dos scrapers (para desenvolvimento)
  */
