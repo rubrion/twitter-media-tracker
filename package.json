@@ -1,7 +1,7 @@
 {
   "name": "social-media-tracker",
   "version": "1.0.0",
-  "description": "Simple POC middleware for tracking Twitter metrics using Apify",
+  "description": "Twitter Media Tracker — verify follows and comments using Apify actors. Ready for deployment as a Railway template.",
   "main": "dist/index.js",
   "scripts": {
     "start": "node dist/index.js",
