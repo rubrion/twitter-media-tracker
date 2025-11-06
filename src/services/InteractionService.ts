@@ -628,7 +628,7 @@ async verificarComentario(
         getRetweeters: false,
         includeUnavailableUsers: false,
         maxRequestRetries: 3,
-        maxItems: 2000, // OTIMIZADO: Limitado para reduzir custos
+        maxItems: 50000, // OTIMIZADO: Limitado para reduzir custos
       };
 
       console.log(
